@@ -1,0 +1,393 @@
+[gd_scene load_steps=15 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/player.tscn" id="2"]
+[ext_resource type="Script" path="res://scripts/touch_controls.gd" id="3"]
+[ext_resource type="Script" path="res://scripts/procedural_audio.gd" id="5"]
+[ext_resource type="Texture2D" path="res://assets/branding/white_noon_logo_mark.png" id="6_logo"]
+
+[sub_resource type="ProceduralSkyMaterial" id="SkyMaterial"]
+sky_top_color = Color(0.025, 0.19, 0.64, 1)
+sky_horizon_color = Color(0.20, 0.54, 0.79, 1)
+sky_curve = 0.32
+ground_bottom_color = Color(0.075, 0.12, 0.045, 1)
+ground_horizon_color = Color(0.34, 0.47, 0.25, 1)
+ground_curve = 0.22
+sun_angle_max = 6.0
+sun_curve = 0.08
+
+[sub_resource type="Sky" id="Sky"]
+sky_material = SubResource("SkyMaterial")
+
+[sub_resource type="Environment" id="Environment"]
+background_mode = 2
+sky = SubResource("Sky")
+tonemap_mode = 2
+tonemap_exposure = 0.70
+adjustment_enabled = true
+adjustment_brightness = 0.96
+adjustment_contrast = 1.08
+adjustment_saturation = 0.91
+ambient_light_source = 3
+ambient_light_color = Color(0.67, 0.76, 0.84, 1)
+ambient_light_energy = 0.48
+fog_enabled = false
+fog_light_color = Color(0.55, 0.69, 0.76, 1)
+fog_light_energy = 0.18
+fog_density = 0.0022
+fog_height = -2.0
+fog_height_density = 0.0
+fog_aerial_perspective = 0.32
+fog_sky_affect = 0.16
+
+[sub_resource type="Shader" id="DangerShader"]
+code = "shader_type canvas_item;\n\nvoid fragment() {\n\tvec4 base = COLOR;\n\tvec2 p = UV * 2.0 - 1.0;\n\tfloat edge = smoothstep(0.48, 1.02, length(p * vec2(0.72, 1.0)));\n\tfloat corners = smoothstep(0.62, 1.18, length(p));\n\tfloat mask = max(edge, corners);\n\tfloat danger_alpha = base.a * mask;\n\tfloat quiet_vignette = mask * 0.075;\n\tvec3 quiet_tint = vec3(0.018, 0.026, 0.045);\n\tvec3 tint = mix(quiet_tint, base.rgb, clamp(base.a * 2.4, 0.0, 1.0));\n\tCOLOR = vec4(tint, max(quiet_vignette, danger_alpha));\n}\n"
+
+[sub_resource type="ShaderMaterial" id="DangerMaterial"]
+shader = SubResource("DangerShader")
+
+[sub_resource type="StyleBoxFlat" id="PanelStyle"]
+bg_color = Color(0.035, 0.025, 0.02, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.77, 0.61, 0.32, 0.82)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="StyleBoxFlat" id="ButtonStyle"]
+bg_color = Color(0.37, 0.055, 0.035, 0.98)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.83, 0.67, 0.34, 0.88)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+content_margin_left = 22.0
+content_margin_right = 22.0
+content_margin_top = 12.0
+content_margin_bottom = 12.0
+
+[sub_resource type="StyleBoxFlat" id="HealthBack"]
+bg_color = Color(0.055, 0.025, 0.018, 0.88)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.72, 0.46, 0.17, 0.78)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="HealthFill"]
+bg_color = Color(0.78, 0.16, 0.055, 0.96)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="StyleBoxFlat" id="StaminaFill"]
+bg_color = Color(0.88, 0.56, 0.10, 0.96)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[node name="WhiteNoon" type="Node3D"]
+process_mode = 3
+script = ExtResource("1")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-40, 226, 0)
+light_color = Color(1, 0.93, 0.76, 1)
+light_energy = 1.32
+shadow_enabled = true
+directional_shadow_max_distance = 72.0
+directional_shadow_blend_splits = true
+directional_shadow_fade_start = 0.84
+
+[node name="Player" parent="." instance=ExtResource("2")]
+position = Vector3(0, 0.1, 24)
+
+[node name="ProceduralAudio" type="Node" parent="."]
+script = ExtResource("5")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="Danger" type="ColorRect" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+material = SubResource("DangerMaterial")
+color = Color(0.45, 0, 0, 0)
+
+[node name="Objective" type="Label" parent="UI"]
+offset_left = 24.0
+offset_top = 20.0
+offset_right = 560.0
+offset_bottom = 58.0
+theme_override_colors/font_color = Color(1, 0.94, 0.72, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.85)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 22
+text = "Печати: 0 / 3"
+
+[node name="Health" type="Control" parent="UI"]
+visible = false
+offset_left = 24.0
+offset_top = 57.0
+offset_right = 264.0
+offset_bottom = 145.0
+mouse_filter = 2
+
+[node name="Title" type="Label" parent="UI/Health"]
+offset_right = 90.0
+offset_bottom = 20.0
+theme_override_colors/font_color = Color(0.96, 0.75, 0.39, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_font_sizes/font_size = 14
+text = "ЖИЗНЬ"
+
+[node name="Value" type="Label" parent="UI/Health"]
+offset_left = 125.0
+offset_right = 230.0
+offset_bottom = 20.0
+theme_override_colors/font_color = Color(1, 0.88, 0.68, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_font_sizes/font_size = 13
+text = "100 / 100"
+horizontal_alignment = 2
+
+[node name="Bar" type="ProgressBar" parent="UI/Health"]
+offset_top = 23.0
+offset_right = 230.0
+offset_bottom = 41.0
+mouse_filter = 2
+theme_override_styles/background = SubResource("HealthBack")
+theme_override_styles/fill = SubResource("HealthFill")
+value = 100.0
+show_percentage = false
+
+[node name="StaminaTitle" type="Label" parent="UI/Health"]
+offset_top = 47.0
+offset_right = 120.0
+offset_bottom = 67.0
+theme_override_colors/font_color = Color(0.96, 0.75, 0.39, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_font_sizes/font_size = 14
+text = "СИЛЫ"
+
+[node name="StaminaValue" type="Label" parent="UI/Health"]
+offset_left = 125.0
+offset_top = 47.0
+offset_right = 230.0
+offset_bottom = 67.0
+theme_override_colors/font_color = Color(1, 0.88, 0.68, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_font_sizes/font_size = 13
+text = "100 / 100"
+horizontal_alignment = 2
+
+[node name="StaminaBar" type="ProgressBar" parent="UI/Health"]
+offset_top = 70.0
+offset_right = 230.0
+offset_bottom = 86.0
+mouse_filter = 2
+theme_override_styles/background = SubResource("HealthBack")
+theme_override_styles/fill = SubResource("StaminaFill")
+value = 100.0
+show_percentage = false
+
+[node name="Pulse" type="Label" parent="UI"]
+visible = false
+offset_left = 280.0
+offset_top = 61.0
+offset_right = 570.0
+offset_bottom = 88.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.96, 0.70, 0.27, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 15
+text = "ИМПУЛЬС: НЕТ ПЕЧАТИ"
+
+[node name="Shade" type="Label" parent="UI"]
+offset_left = 24.0
+offset_top = 153.0
+offset_right = 520.0
+offset_bottom = 184.0
+theme_override_colors/font_color = Color(0.92, 0.3, 0.18, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/font_size = 18
+
+[node name="Hint" type="Label" parent="UI"]
+anchor_left = 0.08
+anchor_top = 0.5
+anchor_right = 0.92
+anchor_bottom = 0.5
+offset_top = 180.0
+offset_bottom = 230.0
+theme_override_colors/font_color = Color(1, 0.9, 0.6, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/font_size = 20
+text = ""
+horizontal_alignment = 1
+
+[node name="Crosshair" type="Label" parent="UI"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -8.0
+offset_top = -15.0
+offset_right = 8.0
+offset_bottom = 15.0
+theme_override_colors/font_color = Color(1, 0.91, 0.63, 0.75)
+theme_override_font_sizes/font_size = 22
+text = "+"
+horizontal_alignment = 1
+
+[node name="TouchControls" type="Control" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("3")
+
+[node name="Intro" type="ColorRect" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.018, 0.014, 0.011, 0.91)
+
+[node name="Center" type="CenterContainer" parent="UI/Intro"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Panel" type="PanelContainer" parent="UI/Intro/Center"]
+custom_minimum_size = Vector2(520, 0)
+theme_override_styles/panel = SubResource("PanelStyle")
+
+[node name="Margin" type="MarginContainer" parent="UI/Intro/Center/Panel"]
+theme_override_constants/margin_left = 42
+theme_override_constants/margin_top = 34
+theme_override_constants/margin_right = 42
+theme_override_constants/margin_bottom = 34
+
+[node name="Content" type="VBoxContainer" parent="UI/Intro/Center/Panel/Margin"]
+theme_override_constants/separation = 18
+alignment = 1
+
+[node name="Logo" type="TextureRect" parent="UI/Intro/Center/Panel/Margin/Content"]
+custom_minimum_size = Vector2(0, 92)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("6_logo")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Title" type="Label" parent="UI/Intro/Center/Panel/Margin/Content"]
+theme_override_colors/font_color = Color(1, 0.93, 0.76, 1)
+theme_override_font_sizes/font_size = 44
+text = "БЕЛЫЙ ПОЛДЕНЬ"
+horizontal_alignment = 1
+
+[node name="Story" type="Label" parent="UI/Intro/Center/Panel/Margin/Content"]
+theme_override_colors/font_color = Color(0.94, 0.9, 0.76, 1)
+theme_override_font_sizes/font_size = 19
+text = "Деревня Белояр встретила вас тишиной.\nНайдите три солнечные печати и уходите через северные ворота.\n\nСтраж медлителен на свету. В тени домов он почти неотвратим."
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="Controls" type="Label" parent="UI/Intro/Center/Panel/Margin/Content"]
+theme_override_colors/font_color = Color(0.76, 0.67, 0.49, 1)
+theme_override_font_sizes/font_size = 16
+text = "WASD — идти  •  Shift — бежать  •  Мышь/свайп — обзор  •  E/Пробел — импульс  •  Esc/кнопка паузы"
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="Start" type="Button" parent="UI/Intro/Center/Panel/Margin/Content"]
+theme_override_font_sizes/font_size = 21
+theme_override_styles/normal = SubResource("ButtonStyle")
+text = "ВОЙТИ В ДЕРЕВНЮ"
+
+[node name="Menu" type="Button" parent="UI/Intro/Center/Panel/Margin/Content"]
+custom_minimum_size = Vector2(0, 42)
+theme_override_font_sizes/font_size = 16
+text = "К ВЫБОРУ УРОВНЕЙ"
+
+[node name="End" type="ColorRect" parent="UI"]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.018, 0.012, 0.011, 0.92)
+
+[node name="Center" type="CenterContainer" parent="UI/End"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Content" type="VBoxContainer" parent="UI/End/Center"]
+custom_minimum_size = Vector2(590, 0)
+theme_override_constants/separation = 18
+
+[node name="Logo" type="TextureRect" parent="UI/End/Center/Content"]
+custom_minimum_size = Vector2(0, 82)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("6_logo")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Title" type="Label" parent="UI/End/Center/Content"]
+theme_override_colors/font_color = Color(1, 0.93, 0.76, 1)
+theme_override_font_sizes/font_size = 42
+horizontal_alignment = 1
+
+[node name="Text" type="Label" parent="UI/End/Center/Content"]
+theme_override_colors/font_color = Color(0.95, 0.9, 0.77, 1)
+theme_override_font_sizes/font_size = 19
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="Restart" type="Button" parent="UI/End/Center/Content"]
+theme_override_font_sizes/font_size = 21
+theme_override_styles/normal = SubResource("ButtonStyle")
+text = "НАЧАТЬ СНОВА"
+
+[node name="Menu" type="Button" parent="UI/End/Center/Content"]
+custom_minimum_size = Vector2(0, 44)
+theme_override_font_sizes/font_size = 16
+text = "К ВЫБОРУ УРОВНЕЙ"
+
+[node name="Pause" type="Label" parent="UI"]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -170.0
+offset_top = -40.0
+offset_right = 170.0
+offset_bottom = 40.0
+theme_override_colors/font_color = Color(1, 0.84, 0.46, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/font_size = 34
+text = "ПАУЗА\nEsc или кнопка паузы — продолжить"
+horizontal_alignment = 1

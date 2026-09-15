@@ -1,0 +1,10 @@
+/.godot/
+/.runtime/
+/build/
+/promo/
+*.log
+*.tmp
+*.bak
+Thumbs.db
+.DS_Store
+tools/*.blend1

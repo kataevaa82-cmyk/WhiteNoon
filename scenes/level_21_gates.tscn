@@ -1,0 +1,10 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/challenge_level.gd" id="1"]
+
+[node name="Level21Gates" type="Node3D"]
+script = ExtResource("1")
+level_number = 21
+seals_required = 12
+enemy_count = 10
+altar_required = 8

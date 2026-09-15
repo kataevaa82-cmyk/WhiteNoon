@@ -1,0 +1,72 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/guardian.gd" id="1"]
+[ext_resource type="PackedScene" path="res://models/guardian_rigged.glb" id="2"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleGuardian"]
+radius = 0.62
+height = 2.6
+
+[sub_resource type="StandardMaterial3D" id="AuraMaterial"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0.42, 0.012, 0.004, 0.34)
+emission_enabled = true
+emission = Color(0.52, 0.006, 0.002, 1)
+emission_energy_multiplier = 1.25
+
+[sub_resource type="TorusMesh" id="AuraMesh"]
+material = SubResource("AuraMaterial")
+inner_radius = 0.74
+outer_radius = 0.91
+rings = 20
+ring_segments = 5
+
+[sub_resource type="StandardMaterial3D" id="ChargeMaterial"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(1, 0.78, 0.08, 0.56)
+emission_enabled = true
+emission = Color(1, 0.24, 0.004, 1)
+emission_energy_multiplier = 2.2
+
+[sub_resource type="BoxMesh" id="ChargeMesh"]
+material = SubResource("ChargeMaterial")
+size = Vector3(0.65, 0.035, 5.4)
+
+[node name="Guardian" type="CharacterBody3D"]
+process_mode = 1
+script = ExtResource("1")
+
+[node name="Model" parent="." instance=ExtResource("2")]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+position = Vector3(0, 1.3, 0)
+shape = SubResource("CapsuleGuardian")
+
+[node name="Aura" type="MeshInstance3D" parent="."]
+visible = false
+position = Vector3(0, 0.06, 0)
+cast_shadow = 0
+mesh = SubResource("AuraMesh")
+
+[node name="AttackTell" type="MeshInstance3D" parent="."]
+visible = false
+position = Vector3(0, 2.05, 0)
+rotation = Vector3(1.5708, 0, 0)
+scale = Vector3(1.35, 1.35, 1.35)
+cast_shadow = 0
+mesh = SubResource("AuraMesh")
+
+[node name="ChargeTell" type="MeshInstance3D" parent="."]
+visible = false
+position = Vector3(0, 0.09, 2.7)
+cast_shadow = 0
+mesh = SubResource("ChargeMesh")
+
+[node name="EyesGlow" type="OmniLight3D" parent="."]
+position = Vector3(0, 2.8, 0.35)
+light_color = Color(1, 0.055, 0.012, 1)
+light_energy = 0.0
+omni_range = 2.4
+shadow_enabled = false
