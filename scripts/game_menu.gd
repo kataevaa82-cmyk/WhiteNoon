@@ -2,6 +2,14 @@ extends Node
 
 const FLOW := preload("res://scripts/game_flow.gd")
 
+## Тема меню весит 2.9 МБ и раньше лежала внутри index.pck как ExtResource
+## сцены: её приходилось скачивать и декодировать до того, как меню вообще
+## появлялось. Теперь на вебе она едет отдельным файлом рядом с index.html и
+## запрашивается уже после mark_game_ready(), поэтому в Game Ready не входит.
+const MENU_MUSIC_FILE := "menu_theme.mp3"
+const MENU_MUSIC_RESOURCE := "res://Midsummer Rite.mp3"
+const MENU_MUSIC_TIMEOUT := 30.0
+
 @onready var yandex: Node = get_node("/root/YandexService")
 @onready var background_material: ShaderMaterial = $UI/Background.material as ShaderMaterial
 @onready var title: Label = $UI/Layout/Title
@@ -11,6 +19,7 @@ const FLOW := preload("res://scripts/game_flow.gd")
 @onready var cloud_button: Button = $UI/Layout/AccountRow/Cloud
 @onready var music_toggle: Button = $UI/Layout/AccountRow/MusicToggle
 @onready var menu_music: AudioStreamPlayer = $MenuMusic
+@onready var story_row: Control = $UI/Layout/Story
 @onready var challenge_heading: Label = $UI/Layout/ChallengeHeading
 @onready var challenge_grid: GridContainer = $UI/Layout/ChallengeScroll/ChallengeGrid
 @onready var footer: Label = $UI/Layout/Footer
@@ -18,6 +27,11 @@ const FLOW := preload("res://scripts/game_flow.gd")
 var current_language := "ru"
 var music_enabled := true
 var menu_music_started := false
+var music_requested := false
+var music_request: HTTPRequest = null
+var daily_button: Button = null
+var daily_level := 0
+var daily_refreshing := false
 var background_clock := 0.0
 var background_suspended := false
 
@@ -32,6 +46,10 @@ const TEXT := {
 		"cloud_loading": "СИНХРОНИЗАЦИЯ С ОБЛАКОМ...",
 		"cloud_local": "ПРОГРЕСС СОХРАНЯЕТСЯ ЛОКАЛЬНО",
 		"cloud_error": "ОБЛАКО НЕДОСТУПНО • СОХРАНЕНО ЛОКАЛЬНО",
+		"daily": "ИСПЫТАНИЕ ДНЯ  •  %02d  %s",
+		"daily_done": "ИСПЫТАНИЕ ДНЯ ПРОЙДЕНО  •  %02d  %s",
+		"daily_streak": "  •  СЕРИЯ: %d",
+		"daily_locked": "ИСПЫТАНИЕ ДНЯ ОТКРОЕТСЯ ПОСЛЕ СЮЖЕТА",
 		"heading": "ИСПЫТАНИЯ  •  УРОВНИ 2–21",
 		"locked": "ЗАКРЫТО",
 		"locked_first": "Пройдите сюжет, чтобы открыть первое испытание",
@@ -48,6 +66,10 @@ const TEXT := {
 		"cloud_loading": "SYNCING CLOUD PROGRESS...",
 		"cloud_local": "PROGRESS IS SAVED LOCALLY",
 		"cloud_error": "CLOUD UNAVAILABLE • SAVED LOCALLY",
+		"daily": "CHALLENGE OF THE DAY  •  %02d  %s",
+		"daily_done": "DAILY CHALLENGE CLEARED  •  %02d  %s",
+		"daily_streak": "  •  STREAK: %d",
+		"daily_locked": "THE DAILY CHALLENGE UNLOCKS AFTER THE STORY",
 		"heading": "CHALLENGES  •  LEVELS 2–21",
 		"locked": "LOCKED",
 		"locked_first": "Finish the story to unlock the first challenge",
@@ -68,6 +90,7 @@ func _ready() -> void:
 	yandex.progress_changed.connect(_on_progress_changed)
 	yandex.authorization_changed.connect(_on_authorization_changed)
 	yandex.cloud_status_changed.connect(_on_cloud_status_changed)
+	_build_daily_button()
 	_build_challenge_buttons()
 	_apply_language(String(yandex.detected_language))
 	_update_progress_ui()
@@ -75,7 +98,12 @@ func _ready() -> void:
 	_update_music_ui()
 	yandex.gameplay_stop()
 	yandex.mark_game_ready()
-	if not OS.has_feature("web"):
+	if OS.has_feature("web"):
+		# Строго после mark_game_ready(): загрузка трека не должна попадать
+		# в критический путь, а браузер всё равно не даст играть звук до
+		# первого жеста игрока.
+		call_deferred("_request_menu_music")
+	else:
 		_start_menu_music()
 
 func _input(event: InputEvent) -> void:
@@ -96,6 +124,50 @@ func _process(delta: float) -> void:
 		return
 	background_clock += delta
 	background_material.set_shader_parameter("motion_value", background_clock)
+
+## Возврат в игру должен быть виден сразу: «испытание дня» стоит прямо под
+## кнопкой сюжета, а не в глубине списка из двадцати уровней.
+func _build_daily_button() -> void:
+	daily_button = Button.new()
+	daily_button.name = "DailyChallenge"
+	daily_button.custom_minimum_size = Vector2(0, 44)
+	daily_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	daily_button.add_theme_font_size_override("font_size", 17)
+	_style_menu_button(daily_button, true)
+	daily_button.pressed.connect(_open_daily)
+	$UI/Layout.add_child(daily_button)
+	$UI/Layout.move_child(daily_button, story_row.get_index() + 1)
+
+func _refresh_daily_button() -> void:
+	# Закрепление испытания сохраняет прогресс, а сохранение снова дёргает
+	# обновление UI. Без этого флага получилась бы лишняя рекурсия.
+	if not is_instance_valid(daily_button) or daily_refreshing:
+		return
+	daily_refreshing = true
+	_refresh_daily_button_inner()
+	daily_refreshing = false
+
+func _refresh_daily_button_inner() -> void:
+	var strings: Dictionary = TEXT[current_language]
+	daily_level = yandex.get_daily_level()
+	if daily_level <= 0:
+		# На сегодня ещё не выбрано — фиксируем выбор один раз за сутки.
+		daily_level = yandex.pin_daily_challenge(FLOW.daily_challenge_level(yandex, yandex.current_day()))
+	if daily_level <= 0:
+		daily_button.text = String(strings.daily_locked)
+		daily_button.disabled = true
+		return
+	daily_button.disabled = false
+	var level_title := FLOW.challenge_title(daily_level, current_language)
+	var done: bool = yandex.is_daily_done()
+	daily_button.text = String(strings.daily_done if done else strings.daily) % [daily_level, level_title]
+	var streak: int = yandex.get_daily_streak()
+	if streak > 1:
+		daily_button.text += String(strings.daily_streak) % streak
+
+func _open_daily() -> void:
+	if daily_level > 0:
+		_open_challenge(daily_level)
 
 func _build_challenge_buttons() -> void:
 	for child in challenge_grid.get_children():
@@ -164,8 +236,69 @@ func _toggle_music() -> void:
 
 func _start_menu_music() -> void:
 	menu_music_started = true
-	if not menu_music.playing:
+	_request_menu_music()
+	if menu_music.stream != null and not menu_music.playing:
 		menu_music.play()
+
+func _request_menu_music() -> void:
+	if music_requested or menu_music.stream != null:
+		return
+	music_requested = true
+	if not OS.has_feature("web"):
+		var packed := load(MENU_MUSIC_RESOURCE) as AudioStream
+		if packed != null:
+			_install_menu_music(packed)
+		return
+	music_request = HTTPRequest.new()
+	music_request.timeout = MENU_MUSIC_TIMEOUT
+	add_child(music_request)
+	music_request.request_completed.connect(_on_menu_music_received)
+	var error := music_request.request(_menu_music_url())
+	if error != OK:
+		push_warning("Menu music request failed to start: " + error_string(error))
+		_abandon_menu_music("request error %s" % error_string(error))
+
+## Игра живёт в iframe на домене Яндекса, поэтому адрес трека считаем от
+## собственного index.html, а не от корня сайта.
+func _menu_music_url() -> String:
+	var resolved = JavaScriptBridge.eval("""
+		(function () {
+			try { return new URL('%s', window.location.href).href; }
+			catch (error) { return ''; }
+		})()
+	""" % MENU_MUSIC_FILE, true)
+	var url := String(resolved) if resolved != null else ""
+	return url if not url.is_empty() else MENU_MUSIC_FILE
+
+func _on_menu_music_received(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	_drop_menu_music_request()
+	if result != HTTPRequest.RESULT_SUCCESS or response_code >= 400 or body.is_empty():
+		# Меню полностью играбельно и без музыки: остаёмся в тишине, но
+		# оставляем возможность повторить попытку по кнопке «МУЗЫКА».
+		_abandon_menu_music("result %d, code %d" % [result, response_code])
+		return
+	var stream := AudioStreamMP3.new()
+	stream.data = body
+	_install_menu_music(stream)
+
+func _install_menu_music(stream: AudioStream) -> void:
+	if stream is AudioStreamMP3:
+		# В сцене трек стоял с loop=false и обрывался на середине меню.
+		stream.loop = true
+	menu_music.stream = stream
+	if music_enabled and menu_music_started and not menu_music.playing:
+		menu_music.play()
+
+func _drop_menu_music_request() -> void:
+	if is_instance_valid(music_request):
+		music_request.queue_free()
+	music_request = null
+
+## Сбрасываем флаг запроса: повторное включение музыки попробует ещё раз.
+func _abandon_menu_music(reason: String) -> void:
+	_drop_menu_music_request()
+	music_requested = false
+	push_warning("Menu music is unavailable (%s)" % reason)
 
 func _update_music_ui() -> void:
 	if not is_instance_valid(music_toggle):
@@ -196,6 +329,7 @@ func _update_progress_ui() -> void:
 	if not is_instance_valid(progress_label):
 		return
 	var strings: Dictionary = TEXT[current_language]
+	_refresh_daily_button()
 	progress_label.text = String(strings.progress) % yandex.get_completed_challenge_count()
 	story_button.text = String(strings.story)
 	if bool(yandex.progress.get("story_completed", false)):

@@ -11,12 +11,15 @@ $outputRoot = Join-Path $projectRoot "build\web"
 $archivePath = Join-Path $projectRoot "build\WhiteNoon-Yandex.zip"
 $loaderBackground = Join-Path $projectRoot "assets\branding\menu_loader_background.jpg"
 $loaderMark = Join-Path $projectRoot "assets\branding\white_noon_logo_mark.png"
+# Тема меню едет отдельным файлом рядом с index.html, а не внутри index.pck:
+# 2.9 МБ mp3 больше не задерживают первый кадр и Game Ready.
+$menuMusic = Join-Path $projectRoot "Midsummer Rite.mp3"
 $promoRoot = Join-Path $projectRoot "promo\yandex"
 
 if (-not (Test-Path -LiteralPath $templateZip)) {
     throw "Godot Web template not found: $templateZip"
 }
-foreach ($brandingFile in @($loaderBackground, $loaderMark)) {
+foreach ($brandingFile in @($loaderBackground, $loaderMark, $menuMusic)) {
     if (-not (Test-Path -LiteralPath $brandingFile)) {
         throw "Web loader branding asset not found: $brandingFile"
     }
@@ -110,6 +113,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $stageRoot "godot.audio.position.worklet.js") -Destination (Join-Path $resolvedOutput "index.audio.position.worklet.js") -Force
     Copy-Item -LiteralPath $loaderBackground -Destination (Join-Path $resolvedOutput "loader_bg.jpg") -Force
     Copy-Item -LiteralPath $loaderMark -Destination (Join-Path $resolvedOutput "loader_mark.png") -Force
+    Copy-Item -LiteralPath $menuMusic -Destination (Join-Path $resolvedOutput "menu_theme.mp3") -Force
 
     $packSize = (Get-Item -LiteralPath (Join-Path $resolvedOutput "index.pck")).Length
     $wasmSize = (Get-Item -LiteralPath (Join-Path $resolvedOutput "index.wasm")).Length
@@ -333,7 +337,8 @@ $requiredFiles = @(
     "index.audio.worklet.js",
     "index.audio.position.worklet.js",
     "loader_bg.jpg",
-    "loader_mark.png"
+    "loader_mark.png",
+    "menu_theme.mp3"
 )
 foreach ($requiredFile in $requiredFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $resolvedOutput $requiredFile))) {
@@ -357,6 +362,17 @@ $finalHtml = Get-Content -LiteralPath (Join-Path $resolvedOutput "index.html") -
 foreach ($contract in @('/sdk.js', 'async onload="whiteNoonSdkLoaded()"', 'rel="preload" href="index.wasm"', 'rel="icon" href="loader_mark.png"', 'screen-orientation', 'orientation-notice', "screen.orientation.lock('landscape')", 'contextmenu', 'overscroll-behavior', 'loader_bg.jpg', 'loader_mark.png', 'WHITE NOON', 'whiteNoonLoaderHidden = true', 'whiteNoonSendGameReady')) {
     if (-not $finalHtml.Contains($contract)) {
         throw "Yandex HTML contract is missing: $contract"
+    }
+}
+$packBytes = [IO.File]::ReadAllBytes((Join-Path $resolvedOutput "index.pck"))
+$packText = [Text.Encoding]::ASCII.GetString($packBytes)
+if ($packText.Contains("Midsummer Rite.mp3")) {
+    throw "Menu music is still packed into index.pck; check the Web preset exclude_filter."
+}
+$menuSource = Get-Content -LiteralPath (Join-Path $resolvedProject "scripts\game_menu.gd") -Raw -Encoding UTF8
+foreach ($contract in @('menu_theme.mp3', 'HTTPRequest.new()', 'AudioStreamMP3.new()')) {
+    if (-not $menuSource.Contains($contract)) {
+        throw "Streamed menu music contract is missing: $contract"
     }
 }
 $serviceSource = Get-Content -LiteralPath (Join-Path $resolvedProject "scripts\yandex_service.gd") -Raw -Encoding UTF8

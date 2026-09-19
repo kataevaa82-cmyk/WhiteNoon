@@ -96,6 +96,25 @@ static func is_challenge_unlocked(level_number: int, service: Node) -> bool:
 		return bool(service.progress.get("story_completed", false))
 	return service.is_level_completed(level_number - 1)
 
+## Детерминированный выбор «испытания дня»: одинаковый у всех игроков в мире
+## и не зависящий от платформенного hash(). Выбираем только из уже открытых
+## уровней, иначе кнопка вела бы в закрытую дверь.
+static func daily_challenge_level(service: Node, day: int) -> int:
+	var pool: Array[int] = []
+	for level_number in range(FIRST_CHALLENGE, LAST_CHALLENGE + 1):
+		if is_challenge_unlocked(level_number, service):
+			pool.append(level_number)
+	if pool.is_empty():
+		return 0
+	# Лавинное перемешивание: без него номер дня просто сдвигал бы уровень
+	# на +1 каждые сутки, и порядок был бы виден невооружённым глазом.
+	# Маска в 31 бит держит значение положительным, поэтому >> и % безопасны.
+	var mixed := day & 0x7FFFFFFF
+	mixed = ((mixed ^ (mixed >> 16)) * 2246822519) & 0x7FFFFFFF
+	mixed = ((mixed ^ (mixed >> 13)) * 3266489917) & 0x7FFFFFFF
+	mixed = mixed ^ (mixed >> 16)
+	return pool[mixed % pool.size()]
+
 static func has_next_challenge(level_number: int) -> bool:
 	return level_number >= FIRST_CHALLENGE and level_number < LAST_CHALLENGE
 

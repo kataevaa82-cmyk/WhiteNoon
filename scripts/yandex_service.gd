@@ -12,6 +12,18 @@ const CLOUD_SAVE_KEY := "white_noon_progress"
 const FIRST_CHALLENGE := 2
 const LAST_CHALLENGE := 21
 
+## ВАЖНО: должно совпадать с техническим именем лидерборда в консоли
+## разработчика (Игра → Лидерборды). При несовпадении SDK вернёт ошибку,
+## мы её проглотим и запишем предупреждение в консоль — на геймплей это
+## не влияет.
+const LEADERBOARD_NAME := "whitenoon"
+
+## Очки для лидерборда: больше — лучше, поэтому сортировка по умолчанию
+## подходит и не требует инверсии в консоли.
+const SCORE_PER_LEVEL := 100
+const SCORE_STORY_BONUS := 150
+const GRADE_BONUS := {"S": 60, "A": 40, "B": 20, "C": 10}
+
 const DEFAULT_PROGRESS := {
 	"version": 1,
 	"story_completed": false,
@@ -20,6 +32,10 @@ const DEFAULT_PROGRESS := {
 	"completed_levels": [],
 	"best_times": {},
 	"best_grades": {},
+	"daily_day": 0,
+	"daily_level": 0,
+	"daily_done_day": 0,
+	"daily_streak": 0,
 	"updated_at": 0,
 }
 
@@ -56,6 +72,10 @@ var _pending_reward_callback := Callable()
 var _reward_pending := false
 var _reward_granted := false
 var _review_prompt_requested := false
+var _shortcut_prompt_requested := false
+var _leaderboard_callback
+var _shortcut_callback
+var _submitted_score := -1
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -87,6 +107,8 @@ func _setup_web_sdk() -> void:
 	_cloud_progress_callback = JavaScriptBridge.create_callback(_on_cloud_progress)
 	_cloud_error_callback = JavaScriptBridge.create_callback(_on_cloud_error)
 	_save_callback = JavaScriptBridge.create_callback(_on_cloud_save_result)
+	_leaderboard_callback = JavaScriptBridge.create_callback(_on_leaderboard_result)
+	_shortcut_callback = JavaScriptBridge.create_callback(_on_shortcut_result)
 	var window = JavaScriptBridge.get_interface("window")
 	window.whiteNoonAdOpen = _ad_open_callback
 	window.whiteNoonAdClose = _ad_close_callback
@@ -100,6 +122,8 @@ func _setup_web_sdk() -> void:
 	window.whiteNoonCloudProgress = _cloud_progress_callback
 	window.whiteNoonCloudError = _cloud_error_callback
 	window.whiteNoonSaveResult = _save_callback
+	window.whiteNoonLeaderboardResult = _leaderboard_callback
+	window.whiteNoonShortcutResult = _shortcut_callback
 	cloud_status = "loading"
 	cloud_status_changed.emit(cloud_status)
 	JavaScriptBridge.eval("""
@@ -122,6 +146,38 @@ func _setup_web_sdk() -> void:
 					if (window.whiteNoonVisibility) window.whiteNoonVisibility(document.hidden);
 				});
 			}
+			window.whiteNoonSubmitScore = async function (name, score) {
+				try {
+					if (!window.ysdk) return;
+					var board = window.whiteNoonLeaderboards;
+					if (!board) {
+						board = await window.ysdk.getLeaderboards();
+						window.whiteNoonLeaderboards = board;
+					}
+					await board.setLeaderboardScore(name, score);
+					if (window.whiteNoonLeaderboardResult) window.whiteNoonLeaderboardResult(true);
+				} catch (error) {
+					// Обычно это неавторизованный игрок или другое имя
+					// лидерборда в консоли. На геймплей не влияет.
+					console.warn('Yandex leaderboard:', error);
+					if (window.whiteNoonLeaderboardResult) window.whiteNoonLeaderboardResult(false);
+				}
+			};
+			window.whiteNoonOfferShortcut = async function () {
+				try {
+					if (!window.ysdk || !window.ysdk.shortcut) return;
+					var can = await window.ysdk.shortcut.canShowPrompt();
+					if (!can || !can.canShow) {
+						if (window.whiteNoonShortcutResult) window.whiteNoonShortcutResult(false);
+						return;
+					}
+					var result = await window.ysdk.shortcut.showPrompt();
+					if (window.whiteNoonShortcutResult) window.whiteNoonShortcutResult(!!(result && result.outcome === 'accepted'));
+				} catch (error) {
+					console.warn('Yandex shortcut:', error);
+					if (window.whiteNoonShortcutResult) window.whiteNoonShortcutResult(false);
+				}
+			};
 			window.whiteNoonLoadPlayer = async function () {
 				try {
 					if (!window.ysdk) throw new Error('SDK is not initialized');
@@ -323,11 +379,78 @@ func request_review_if_available() -> void:
 		}
 	""")
 
+## Общий счёт игрока: чем больше, тем лучше. Ровно его мы и кладём в
+## лидерборд, поэтому инвертировать сортировку в консоли не нужно.
+func get_total_score() -> int:
+	var score := 0
+	if bool(progress.get("story_completed", false)):
+		score += SCORE_STORY_BONUS + int(GRADE_BONUS.get(String(progress.get("story_best_grade", "")), 0))
+	for level_number in progress.completed_levels:
+		score += SCORE_PER_LEVEL + int(GRADE_BONUS.get(get_level_grade(int(level_number)), 0))
+	return score
+
+func submit_score_if_possible() -> void:
+	if not OS.has_feature("web") or not initialized or not player_authorized:
+		return
+	var score := get_total_score()
+	if score <= 0 or score == _submitted_score:
+		return
+	_submitted_score = score
+	JavaScriptBridge.eval("if (window.whiteNoonSubmitScore) window.whiteNoonSubmitScore('%s', %d);" % [LEADERBOARD_NAME, score])
+
+## Предлагаем ярлык на домашний экран один раз за сессию и только на приятной
+## ноте — после победы, а не на входе в игру.
+func offer_shortcut_if_available() -> void:
+	if _shortcut_prompt_requested or not OS.has_feature("web") or not initialized:
+		return
+	_shortcut_prompt_requested = true
+	JavaScriptBridge.eval("if (window.whiteNoonOfferShortcut) window.whiteNoonOfferShortcut();")
+
+## Номер текущих суток в UTC: у всех игроков «испытание дня» совпадает.
+func current_day() -> int:
+	return int(Time.get_unix_time_from_system() / 86400.0)
+
+## Испытание дня фиксируется в прогрессе, чтобы выбор не «уехал» после того,
+## как игрок откроет новый уровень прямо в этой же сессии.
+func pin_daily_challenge(level_number: int) -> int:
+	var today := current_day()
+	if int(progress.get("daily_day", 0)) == today and int(progress.get("daily_level", 0)) > 0:
+		return int(progress.daily_level)
+	if level_number <= 0:
+		return 0
+	progress.daily_day = today
+	progress.daily_level = level_number
+	_commit_progress()
+	return level_number
+
+func get_daily_level() -> int:
+	return int(progress.daily_level) if int(progress.get("daily_day", 0)) == current_day() else 0
+
+func is_daily_done() -> bool:
+	return int(progress.get("daily_done_day", 0)) == current_day()
+
+## Серия обрывается, если игрок пропустил вчера и сегодня ещё не играл.
+func get_daily_streak() -> int:
+	var last_done := int(progress.get("daily_done_day", 0))
+	return int(progress.get("daily_streak", 0)) if last_done >= current_day() - 1 else 0
+
+func _register_daily_completion(level_number: int) -> void:
+	var today := current_day()
+	var previous := int(progress.get("daily_done_day", 0))
+	if get_daily_level() != level_number or previous == today:
+		return
+	progress.daily_streak = int(progress.get("daily_streak", 0)) + 1 if previous == today - 1 else 1
+	progress.daily_done_day = today
+
 func record_story_result(elapsed: float, grade: String) -> void:
 	progress.story_completed = true
 	progress.story_best_time = _best_time(float(progress.get("story_best_time", 0.0)), elapsed)
 	progress.story_best_grade = _best_grade(String(progress.get("story_best_grade", "")), grade)
 	_commit_progress()
+	submit_score_if_possible()
+	# Финал сюжета — лучший момент и для отзыва, и для ярлыка на экране.
+	call_deferred("request_review_if_available")
+	call_deferred("offer_shortcut_if_available")
 
 func record_level_result(level_number: int, elapsed: float, grade: String) -> void:
 	if level_number < FIRST_CHALLENGE or level_number > LAST_CHALLENGE:
@@ -344,7 +467,9 @@ func record_level_result(level_number: int, elapsed: float, grade: String) -> vo
 	var grades: Dictionary = progress.best_grades
 	grades[key] = _best_grade(String(grades.get(key, "")), grade)
 	progress.best_grades = grades
+	_register_daily_completion(level_number)
 	_commit_progress()
+	submit_score_if_possible()
 	if get_completed_challenge_count() >= 3:
 		call_deferred("request_review_if_available")
 
@@ -463,6 +588,13 @@ func _merge_progress(base: Dictionary, incoming: Dictionary) -> Dictionary:
 				var level_number := int(key)
 				if level_number >= FIRST_CHALLENGE and level_number <= LAST_CHALLENGE:
 					merged.best_grades[key] = _best_grade(String(merged.best_grades.get(key, "")), String(source_grades[raw_key]))
+		merged.daily_streak = maxi(int(merged.daily_streak), int(source.get("daily_streak", 0)))
+		merged.daily_done_day = maxi(int(merged.daily_done_day), int(source.get("daily_done_day", 0)))
+		# Испытание дня берём у более свежей записи, иначе два устройства
+		# будут спорить, какой уровень сегодняшний.
+		if int(source.get("daily_day", 0)) >= int(merged.daily_day):
+			merged.daily_day = int(source.get("daily_day", 0))
+			merged.daily_level = int(source.get("daily_level", 0))
 		merged.updated_at = maxi(int(merged.updated_at), int(source.get("updated_at", 0)))
 	return merged
 
@@ -527,6 +659,9 @@ func _on_sdk_ready(args: Array) -> void:
 func _on_player_ready(args: Array) -> void:
 	player_authorized = not args.is_empty() and bool(args[0])
 	authorization_changed.emit(player_authorized)
+	if player_authorized:
+		# Игрок мог набрать очки гостем: отправляем накопленное сразу.
+		call_deferred("submit_score_if_possible")
 
 func _on_cloud_progress(args: Array) -> void:
 	var incoming: Dictionary = {}
@@ -546,6 +681,15 @@ func _on_cloud_error(_args: Array) -> void:
 func _on_cloud_save_result(args: Array) -> void:
 	cloud_status = "synced" if not args.is_empty() and bool(args[0]) else "error"
 	cloud_status_changed.emit(cloud_status)
+
+func _on_leaderboard_result(args: Array) -> void:
+	if not (not args.is_empty() and bool(args[0])):
+		# Разрешаем повторную попытку после следующей победы: игрок мог
+		# авторизоваться уже после первой отправки.
+		_submitted_score = -1
+
+func _on_shortcut_result(_args: Array) -> void:
+	pass
 
 func _on_sdk_pause(_args: Array) -> void:
 	_sdk_paused = true

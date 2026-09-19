@@ -108,7 +108,7 @@ const TEXT := {
 		"health": "ЖИЗНЬ",
 		"stamina": "СИЛЫ",
 		"shade": "В ТЕНИ — СТРАЖ БЫСТРЕЕ, РАНЫ НЕ ЗАЖИВАЮТ",
-		"intro_hint": "Три печати держат ворота закрытыми. Солнечный свет залечивает раны.",
+		"intro_hint": "Три печати держат ворота закрытыми. E / Пробел — солнце укажет ближайшую.",
 		"guardian_hint": "Страж проснулся. Держитесь солнечной тропы.",
 		"guardian_charge": "Янтарный след — Страж готовит рывок. Уйдите в сторону!",
 		"last_seal": "Последний запор снят. Дорога через перевал открыта!",
@@ -122,7 +122,7 @@ const TEXT := {
 		"seal_heal": "Печать вспыхнула: раны затянулись, Страж оглушён.",
 		"pulse": "Солнечный импульс отбросил Стража.",
 		"pulse_reveal": "Импульс указал ближайшую печать — %d м.",
-		"pulse_locked": "Сначала пробудите силу хотя бы одной печати.",
+		"pulse_locked": "Отбросить Стража можно только силой пробуждённой печати.",
 		"pulse_far": "Страж слишком далеко для импульса.",
 		"pulse_tired": "Не хватает сил для солнечного импульса.",
 		"pulse_cooldown": "Солнечный импульс ещё не восстановился.",
@@ -161,7 +161,7 @@ const TEXT := {
 		"health": "HEALTH",
 		"stamina": "STAMINA",
 		"shade": "IN SHADOW — THE GUARDIAN IS FASTER, WOUNDS DO NOT HEAL",
-		"intro_hint": "Three seals lock the gate. Sunlight slowly heals your wounds.",
+		"intro_hint": "Three seals lock the gate. E / Space — the sun points to the nearest one.",
 		"guardian_hint": "The Guardian is awake. Stay on the sunlit path.",
 		"guardian_charge": "Amber trail — the Guardian is charging. Step aside!",
 		"last_seal": "The last ward is gone. The road through the pass is open!",
@@ -175,7 +175,7 @@ const TEXT := {
 		"seal_heal": "The seal flared: wounds mended and the Guardian was stunned.",
 		"pulse": "The sun pulse drove the Guardian back.",
 		"pulse_reveal": "The pulse revealed the nearest seal — %d m.",
-		"pulse_locked": "Awaken the power of at least one seal first.",
+		"pulse_locked": "Only an awakened seal can repel the Guardian.",
 		"pulse_far": "The Guardian is too far away for a pulse.",
 		"pulse_tired": "Not enough stamina for a sun pulse.",
 		"pulse_cooldown": "The sun pulse has not recovered yet.",
@@ -218,6 +218,9 @@ func _ready() -> void:
 	yandex.language_detected.connect(_apply_language)
 	yandex.platform_suspension_changed.connect(_on_platform_suspension_changed)
 	player.set_controls_enabled(false)
+	# Сам затемняющий слой кликов не ловит, поэтому клик мимо панели закрывает
+	# вступление, а клик по панели с текстом и кнопками — нет.
+	intro.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	objective.visible = false
 	health_panel.visible = false
 	pulse_label.visible = false
@@ -260,6 +263,9 @@ func _style_dialog_button(button: Button, accent: bool) -> void:
 	button.add_theme_constant_override("outline_size", 2)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if phase == Phase.INTRO:
+		_skip_intro_on_any_input(event)
+		return
 	if event.is_action_pressed("pause") and phase in [Phase.PLAYING, Phase.PAUSED]:
 		_toggle_pause()
 		get_viewport().set_input_as_handled()
@@ -267,18 +273,40 @@ func _unhandled_input(event: InputEvent) -> void:
 		_try_sun_pulse()
 		get_viewport().set_input_as_handled()
 
+## Игрок уже нажал «начать историю» в меню — второй экран с тем же логотипом
+## и текстом работает как лишний барьер. Кнопка осталась, но вступление теперь
+## закрывается любым действием: клавишей, кликом по затемнению или касанием.
+func _skip_intro_on_any_input(event: InputEvent) -> void:
+	if event.is_action_pressed("pause"):
+		return
+	# Сенсорная кнопка действия шлёт InputEventAction, а не касание экрана,
+	# поэтому её проверяем отдельно — иначе на телефоне она бы не работала.
+	var skip := event.is_action_pressed("interact")
+	if event is InputEventKey:
+		skip = event.pressed and not event.echo
+	elif event is InputEventMouseButton:
+		skip = event.pressed
+	elif event is InputEventScreenTouch:
+		skip = event.pressed
+	if skip and phase == Phase.INTRO:
+		_start_game()
+		get_viewport().set_input_as_handled()
+
 func _try_sun_pulse() -> void:
 	if not totem_used and player.global_position.distance_to(Vector3(0, 0, -2)) < 2.8:
 		_use_totem()
-		return
-	if seals_found <= 0:
-		_show_hint(_text("pulse_locked"), 1.8)
 		return
 	if sun_pulse_cooldown > 0.0:
 		_show_hint(_text("pulse_cooldown"), 1.5)
 		return
 	var guardian_close: bool = guardian.global_position.distance_to(player.global_position) <= 7.5
 	var nearest_seal := _nearest_untaken_seal()
+	# До первой печати солнце умеет только указывать дорогу. Раньше импульс
+	# был заблокирован целиком, и первую печать приходилось искать вслепую —
+	# ровно на этом игроки и уходили в первую минуту.
+	if seals_found <= 0 and guardian_close:
+		_show_hint(_text("pulse_locked"), 1.8)
+		return
 	if not guardian_close and nearest_seal == null:
 		_show_hint(_text("gate_open"), 1.8)
 		return
@@ -310,7 +338,7 @@ func _nearest_untaken_seal() -> Area3D:
 			nearest = seal
 	return nearest
 
-func _spawn_seal_beacon(seal: Area3D) -> void:
+func _spawn_seal_beacon(seal: Area3D, duration := 3.35) -> void:
 	if is_instance_valid(seal_beacon):
 		seal_beacon.queue_free()
 	seal_beacon = Node3D.new()
@@ -349,9 +377,9 @@ func _spawn_seal_beacon(seal: Area3D) -> void:
 	seal_beacon.add_child(ring)
 	create_tween().tween_property(seal_beacon, "scale", Vector3.ONE, 0.3).set_trans(Tween.TRANS_BACK)
 	for part in [beam, ring]:
-		create_tween().tween_property(part, "transparency", 1.0, 2.5).set_delay(0.8)
+		create_tween().tween_property(part, "transparency", 1.0, 2.5).set_delay(maxf(0.8, duration - 2.55))
 	var life := create_tween()
-	life.tween_interval(3.35)
+	life.tween_interval(duration)
 	life.tween_callback(seal_beacon.queue_free)
 
 func _use_totem() -> void:
@@ -1090,6 +1118,11 @@ func _start_game() -> void:
 	player.set_controls_enabled(true)
 	yandex.gameplay_start()
 	_show_hint(_text("intro_hint"), 4.0)
+	# Деревня 60×60 м без единого ориентира: без стартового маяка новичок
+	# не понимает, куда идти, и первая печать находится случайно.
+	var first_seal := _nearest_untaken_seal()
+	if first_seal != null:
+		_spawn_seal_beacon(first_seal, 7.0)
 
 func _on_seal_collected(_seal: Area3D) -> void:
 	if phase != Phase.PLAYING:
