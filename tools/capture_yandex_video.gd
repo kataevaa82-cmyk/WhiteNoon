@@ -8,12 +8,10 @@ const FADE_IN_FRAMES := 9
 const FADE_OUT_FRAMES := 7
 
 var fade_rect: ColorRect
-var music_player: AudioStreamPlayer
 
 
 func _initialize() -> void:
 	_create_fade_overlay()
-	_create_music_player()
 	call_deferred("_capture")
 
 
@@ -23,13 +21,11 @@ func _capture() -> void:
 	if service != null:
 		service.detected_language = language
 	print("Recording Yandex promo in language: ", language)
-	music_player.play()
 	await _capture_story()
 	await _capture_black_sun()
 	await _capture_dolls()
 	await _capture_night()
 	await _capture_gates()
-	await _fade_music(-6.0, -36.0, 10)
 	await _wait_frames(2)
 	quit(0)
 
@@ -221,25 +217,10 @@ func _create_fade_overlay() -> void:
 	layer.add_child(fade_rect)
 
 
-func _create_music_player() -> void:
-	music_player = AudioStreamPlayer.new()
-	music_player.name = "PromoMusic"
-	music_player.stream = load("res://Midsummer Rite.mp3")
-	music_player.volume_db = -6.0
-	root.add_child(music_player)
-
-
 func _fade(from_alpha: float, to_alpha: float, frames: int) -> void:
 	for index in range(frames):
 		var weight := float(index + 1) / float(frames)
 		fade_rect.color.a = lerpf(from_alpha, to_alpha, weight)
-		await process_frame
-
-
-func _fade_music(from_db: float, to_db: float, frames: int) -> void:
-	for index in range(frames):
-		var weight := float(index + 1) / float(frames)
-		music_player.volume_db = lerpf(from_db, to_db, weight)
 		await process_frame
 
 

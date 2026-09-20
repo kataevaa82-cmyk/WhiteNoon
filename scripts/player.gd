@@ -15,6 +15,7 @@ signal footstep(intensity: float)
 
 var controls_enabled := false
 var touch_move := Vector2.ZERO
+var touch_sprint_latched := false
 var pitch := 0.0
 var spawn_point := Vector3.ZERO
 var planar_velocity := Vector3.ZERO
@@ -119,11 +120,21 @@ func _physics_process(delta: float) -> void:
 	var keyboard := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var input_vector := touch_move if touch_move.length() > keyboard.length() else keyboard
 	var local_direction := Vector3(input_vector.x, 0.0, input_vector.y)
-	var direction := (transform.basis * local_direction).normalized()
-	var wants_sprint := Input.is_action_pressed("sprint") or (touch_move.length() > 0.82 and keyboard.length() < 0.1)
+	# limit_length, а не normalized(): раньше любое, даже крошечное отклонение
+	# джойстика давало полную скорость, и персонаж дёргался от дрожи пальца.
+	# С клавиатурой поведение прежнее — get_vector там и так даёт длину 1.
+	var direction := (transform.basis * local_direction).limit_length(1.0)
+	var touch_magnitude := touch_move.length()
+	# Гистерезис: на одном пороге спринт мигал туда-сюда у края стика,
+	# и скорость скакала между 4.2 и 6.7 несколько раз в секунду.
+	if touch_magnitude > 0.88:
+		touch_sprint_latched = true
+	elif touch_magnitude < 0.68:
+		touch_sprint_latched = false
+	var wants_sprint := Input.is_action_pressed("sprint") or (touch_sprint_latched and keyboard.length() < 0.1)
 	if exhausted and stamina >= 34.0:
 		exhausted = false
-	var sprinting := wants_sprint and not exhausted and direction.length_squared() > 0.0
+	var sprinting := wants_sprint and not exhausted and direction.length_squared() > 0.04
 	if sprinting:
 		stamina = maxf(0.0, stamina - stamina_drain * delta)
 		if stamina <= 0.0:

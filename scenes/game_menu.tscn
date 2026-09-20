@@ -46,9 +46,6 @@ content_margin_bottom = 12.0
 process_mode = 3
 script = ExtResource("1_menu")
 
-[node name="MenuMusic" type="AudioStreamPlayer" parent="."]
-volume_db = -11.0
-
 [node name="UI" type="CanvasLayer" parent="."]
 
 [node name="Background" type="ColorRect" parent="UI"]
@@ -125,12 +122,6 @@ custom_minimum_size = Vector2(420, 38)
 layout_mode = 2
 theme_override_font_sizes/font_size = 13
 text = "ВОЙТИ В ЯНДЕКС ID — ОБЛАЧНЫЙ ПРОГРЕСС"
-
-[node name="MusicToggle" type="Button" parent="UI/Layout/AccountRow"]
-custom_minimum_size = Vector2(150, 38)
-layout_mode = 2
-theme_override_font_sizes/font_size = 13
-text = "MUSIC: ON"
 
 [node name="ChallengeHeading" type="Label" parent="UI/Layout"]
 layout_mode = 2

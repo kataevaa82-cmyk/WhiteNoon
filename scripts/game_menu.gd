@@ -2,14 +2,6 @@ extends Node
 
 const FLOW := preload("res://scripts/game_flow.gd")
 
-## Тема меню весит 2.9 МБ и раньше лежала внутри index.pck как ExtResource
-## сцены: её приходилось скачивать и декодировать до того, как меню вообще
-## появлялось. Теперь на вебе она едет отдельным файлом рядом с index.html и
-## запрашивается уже после mark_game_ready(), поэтому в Game Ready не входит.
-const MENU_MUSIC_FILE := "menu_theme.mp3"
-const MENU_MUSIC_RESOURCE := "res://Midsummer Rite.mp3"
-const MENU_MUSIC_TIMEOUT := 30.0
-
 @onready var yandex: Node = get_node("/root/YandexService")
 @onready var background_material: ShaderMaterial = $UI/Background.material as ShaderMaterial
 @onready var title: Label = $UI/Layout/Title
@@ -17,18 +9,12 @@ const MENU_MUSIC_TIMEOUT := 30.0
 @onready var story_button: Button = $UI/Layout/Story
 @onready var progress_label: Label = $UI/Layout/AccountRow/Progress
 @onready var cloud_button: Button = $UI/Layout/AccountRow/Cloud
-@onready var music_toggle: Button = $UI/Layout/AccountRow/MusicToggle
-@onready var menu_music: AudioStreamPlayer = $MenuMusic
 @onready var story_row: Control = $UI/Layout/Story
 @onready var challenge_heading: Label = $UI/Layout/ChallengeHeading
 @onready var challenge_grid: GridContainer = $UI/Layout/ChallengeScroll/ChallengeGrid
 @onready var footer: Label = $UI/Layout/Footer
 
 var current_language := "ru"
-var music_enabled := true
-var menu_music_started := false
-var music_requested := false
-var music_request: HTTPRequest = null
 var daily_button: Button = null
 var daily_level := 0
 var daily_refreshing := false
@@ -81,10 +67,8 @@ const TEXT := {
 func _ready() -> void:
 	story_button.pressed.connect(_open_story)
 	cloud_button.pressed.connect(yandex.open_auth_dialog)
-	music_toggle.pressed.connect(_toggle_music)
 	_style_menu_button(story_button, true)
 	_style_menu_button(cloud_button, false)
-	_style_menu_button(music_toggle, false)
 	yandex.language_detected.connect(_apply_language)
 	yandex.platform_suspension_changed.connect(_on_platform_suspension_changed)
 	yandex.progress_changed.connect(_on_progress_changed)
@@ -95,29 +79,8 @@ func _ready() -> void:
 	_apply_language(String(yandex.detected_language))
 	_update_progress_ui()
 	_update_cloud_ui()
-	_update_music_ui()
 	yandex.gameplay_stop()
 	yandex.mark_game_ready()
-	if OS.has_feature("web"):
-		# Строго после mark_game_ready(): загрузка трека не должна попадать
-		# в критический путь, а браузер всё равно не даст играть звук до
-		# первого жеста игрока.
-		call_deferred("_request_menu_music")
-	else:
-		_start_menu_music()
-
-func _input(event: InputEvent) -> void:
-	if not OS.has_feature("web") or menu_music_started or not music_enabled:
-		return
-	var user_activated := false
-	if event is InputEventKey:
-		user_activated = event.pressed and not event.echo
-	elif event is InputEventMouseButton:
-		user_activated = event.pressed
-	elif event is InputEventScreenTouch:
-		user_activated = event.pressed
-	if user_activated:
-		_start_menu_music()
 
 func _process(delta: float) -> void:
 	if background_suspended or not is_instance_valid(background_material):
@@ -223,87 +186,6 @@ func _apply_language(language: String) -> void:
 	_update_challenge_labels()
 	_update_progress_ui()
 	_update_cloud_ui()
-	_update_music_ui()
-
-func _toggle_music() -> void:
-	music_enabled = not music_enabled
-	if music_enabled:
-		_start_menu_music()
-	else:
-		menu_music_started = false
-		menu_music.stop()
-	_update_music_ui()
-
-func _start_menu_music() -> void:
-	menu_music_started = true
-	_request_menu_music()
-	if menu_music.stream != null and not menu_music.playing:
-		menu_music.play()
-
-func _request_menu_music() -> void:
-	if music_requested or menu_music.stream != null:
-		return
-	music_requested = true
-	if not OS.has_feature("web"):
-		var packed := load(MENU_MUSIC_RESOURCE) as AudioStream
-		if packed != null:
-			_install_menu_music(packed)
-		return
-	music_request = HTTPRequest.new()
-	music_request.timeout = MENU_MUSIC_TIMEOUT
-	add_child(music_request)
-	music_request.request_completed.connect(_on_menu_music_received)
-	var error := music_request.request(_menu_music_url())
-	if error != OK:
-		push_warning("Menu music request failed to start: " + error_string(error))
-		_abandon_menu_music("request error %s" % error_string(error))
-
-## Игра живёт в iframe на домене Яндекса, поэтому адрес трека считаем от
-## собственного index.html, а не от корня сайта.
-func _menu_music_url() -> String:
-	var resolved = JavaScriptBridge.eval("""
-		(function () {
-			try { return new URL('%s', window.location.href).href; }
-			catch (error) { return ''; }
-		})()
-	""" % MENU_MUSIC_FILE, true)
-	var url := String(resolved) if resolved != null else ""
-	return url if not url.is_empty() else MENU_MUSIC_FILE
-
-func _on_menu_music_received(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
-	_drop_menu_music_request()
-	if result != HTTPRequest.RESULT_SUCCESS or response_code >= 400 or body.is_empty():
-		# Меню полностью играбельно и без музыки: остаёмся в тишине, но
-		# оставляем возможность повторить попытку по кнопке «МУЗЫКА».
-		_abandon_menu_music("result %d, code %d" % [result, response_code])
-		return
-	var stream := AudioStreamMP3.new()
-	stream.data = body
-	_install_menu_music(stream)
-
-func _install_menu_music(stream: AudioStream) -> void:
-	if stream is AudioStreamMP3:
-		# В сцене трек стоял с loop=false и обрывался на середине меню.
-		stream.loop = true
-	menu_music.stream = stream
-	if music_enabled and menu_music_started and not menu_music.playing:
-		menu_music.play()
-
-func _drop_menu_music_request() -> void:
-	if is_instance_valid(music_request):
-		music_request.queue_free()
-	music_request = null
-
-## Сбрасываем флаг запроса: повторное включение музыки попробует ещё раз.
-func _abandon_menu_music(reason: String) -> void:
-	_drop_menu_music_request()
-	music_requested = false
-	push_warning("Menu music is unavailable (%s)" % reason)
-
-func _update_music_ui() -> void:
-	if not is_instance_valid(music_toggle):
-		return
-	music_toggle.text = ("МУЗЫКА: ВКЛ" if music_enabled else "МУЗЫКА: ВЫКЛ") if current_language == "ru" else ("MUSIC: ON" if music_enabled else "MUSIC: OFF")
 
 func _update_challenge_labels() -> void:
 	if not is_instance_valid(challenge_grid):
